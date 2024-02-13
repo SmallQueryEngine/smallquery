@@ -1,9 +1,12 @@
 use git2;
+use handlebars;
 use rand::{self, Rng};
 use std::collections::HashMap;
 use std::fs;
+use std::sync;
 use std::{net, path};
 use warp::Filter;
+use serde_json::json;
 
 pub struct HTTPServer {
     addr: net::SocketAddr,
@@ -15,8 +18,52 @@ impl HTTPServer {
     }
 }
 
+struct WithTemplate<T: serde::Serialize> {
+    name: &'static str,
+    value: T,
+}
+
+fn render<T>(template: WithTemplate<T>, hbs: sync::Arc<handlebars::Handlebars<'_>>) -> impl warp::Reply
+where
+    T: serde::Serialize,
+{
+    let render = hbs
+        .render(template.name, &template.value)
+        .unwrap_or_else(|err| err.to_string());
+    // warp::reply::html(render)
+    render
+}
+
 impl HTTPServer {
     pub async fn run(self) -> Result<(), std::io::Error> {
+        // TODO: Create a templating singleton that can render an impl warp::Reply.
+        // The template inputs are:
+        //  1. name
+        //  2. key-value pairs
+        // The variants are:
+        //  1. Found file
+        //  2. Found directory
+        //  3. Error
+        let template = "<!DOCTYPE html>
+                    <html>
+                    <head>
+                        <title>Workspace Detail</title>
+                    </head>
+                    <body>
+                        <h1>Workspace Detail</h1>
+                        <h2>Workspace Logs:</h2>
+                        <pre>{{logs}}</pre>
+                        <h2>Workspace Query Results:</h2>
+                        <pre>{{workspace_query_result}}</pre>
+                    </body>
+                    </html>
+                    ";
+
+        let mut hb = handlebars::Handlebars::new();
+        hb.register_template_string("workspace_detail", template)
+            .unwrap();
+        let hb = sync::Arc::new(hb);
+
         // GET => / => "Hello, World!"
         let root = warp::get().and(warp::path::end()).map(|| "Hello, World!");
         // GET => /health => "Healthy!"
@@ -33,7 +80,7 @@ impl HTTPServer {
             .and(warp::path::end())
             .and(warp::query::<HashMap<String, String>>())
             .map(
-                |input_workspace_name: String, query_params: HashMap<String, String>| {
+                move |input_workspace_name: String, query_params: HashMap<String, String>| {
                     let input_version_default = "latest".to_string();
                     let input_version = query_params
                         .get("version")
@@ -117,7 +164,7 @@ impl HTTPServer {
                     };
                     let workdir_path_mount = workdir_mount.join(path);
 
-                    println!("
+                    let logs = format!("
                         -- Input --
                         Workspace Name: {:?}
                         Workspace Version: {:?}
@@ -145,6 +192,8 @@ impl HTTPServer {
                         workdir_path_mount,
                     );
 
+                    println!("{}", logs);
+
                     // Filesystem Adapter Code
                     // In the checkout, list all items in the workspace path, or return the file content if it's a file.
                     let workspace_query_result = if workdir_path_mount.is_file() {
@@ -166,7 +215,11 @@ impl HTTPServer {
                     };
                     // End Filesystem Adapter Code
 
-                    format!("{:?}", workspace_query_result)
+
+                    render(WithTemplate{
+                        name: "workspace_detail",
+                        value: json!({"logs": logs, "workspace_query_result": workspace_query_result}),
+                    }, hb.clone())
                 },
             );
 

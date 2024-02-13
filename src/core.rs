@@ -1,3 +1,4 @@
+use serde_derive::{Deserialize, Serialize};
 use std::path;
 
 #[derive(Debug)]
@@ -82,7 +83,7 @@ pub struct WorkspaceQuery {
     pub workspace_version: WorkspaceVersion,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 pub enum WorkspaceQueryResult {
     File { name: String, contents: String },
     Directory { name: String, items: Vec<String> },
