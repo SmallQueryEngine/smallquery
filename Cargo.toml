@@ -13,6 +13,8 @@ path = "src/main.rs"
 [dependencies]
 git2 = "0.18.2"
 rand = "0.8.5"
+serde = "1.0.196"
+serde_derive = "1.0.196"
 tokio = { version = "1", features = ["full"] }
 walkdir = "2.4.0"
 warp = "0.3.6"

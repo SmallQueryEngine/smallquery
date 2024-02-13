@@ -805,6 +805,8 @@ version = "0.1.0"
 dependencies = [
  "git2",
  "rand",
+ "serde",
+ "serde_derive",
  "tokio",
  "walkdir",
  "warp",
