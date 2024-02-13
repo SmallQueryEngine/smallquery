@@ -85,17 +85,10 @@ impl HTTPServer {
                     let workdir = tmp.join(random_string);
                     fs::create_dir_all(&workdir).unwrap();
 
-                    // The version may be a reference, commit, or tag.
                     let commit = if let Ok(reference) = repo.resolve_reference_from_short_name(&version) {
-                        println!("Valid reference: {:?}", version);
-                        reference.peel(git2::ObjectType::Commit).unwrap()
+                        reference.peel_to_commit().unwrap()
                     } else if let Ok(commit) = repo.find_commit_by_prefix(&version) {
-                        commit.into_object()
-                    } else if let Ok(oid) = git2::Oid::from_str(&version) {
-                        repo.find_object(oid, None)
-                            .unwrap()
-                            .peel(git2::ObjectType::Commit)
-                            .unwrap()
+                        commit
                     } else {
                         return format!(
                             "Version {:?} does not exist in workspace {:?}",
@@ -103,23 +96,25 @@ impl HTTPServer {
                         );
                     };
 
+                    println!("Version: {:?} -> Commit: {:?}", version, commit.id());
+
                     let mut checkout_builder = git2::build::CheckoutBuilder::new();
                     checkout_builder.target_dir(&workdir);
                     checkout_builder.recreate_missing(true);
 
-                    if let Err(git_error) = repo.checkout_tree(&commit, Some(&mut checkout_builder)) {
+                    if let Err(git_error) = repo.checkout_tree(&commit.into_object(), Some(&mut checkout_builder)) {
                         return match git_error.code() {
                             git2::ErrorCode::UnbornBranch => {
                                 format!(
                                     "Version {:?} does not exist in workspace {:?}",
-                                    version, workspace_name
+                                    version, workspace_name,
                                 )
                             },
                             git2::ErrorCode::GenericError => {
                                 panic!(
                                     "Generic Error when checking out workspace: code={:?} error={:?}",
                                     git_error.code(),
-                                    git_error.message()
+                                    git_error.message(),
                                 )
                             }
                             _ => panic!("Error checking out workspace: code={:?} error={:?}", git_error.code(), git_error.message()), 
