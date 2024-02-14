@@ -1,7 +1,7 @@
-{{#> base.hbs}}
+{{#> page.hbs}}
 
 {{#*inline "title"}}
-Error
+Found file
 {{/inline}}
 
 {{#*inline "content"}}
@@ -10,6 +10,9 @@ Error
 <pre>{{logs}}</pre>
 <h2>Workspace Query Results:</h2>
 <pre>{{workspace_query_result}}</pre>
+
+{{> workspace_query_result.hbs }}
+
 {{/inline}}
 
-{{/base.hbs}}
+{{/page.hbs}}

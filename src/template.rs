@@ -13,11 +13,12 @@ pub struct Template {
 #[derive(Clone)]
 pub struct Registry(handlebars::Handlebars<'static>);
 
-static TEMPLATE_FILE_PATHS: [&str; 4] = [
-    "base.hbs",
+static TEMPLATE_FILE_PATHS: [&str; 5] = [
+    "page.hbs",
     "error.hbs",
     "found_file.hbs",
     "found_directory.hbs",
+    "workspace_query_result.hbs",
 ];
 
 impl Registry {

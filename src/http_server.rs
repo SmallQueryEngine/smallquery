@@ -47,6 +47,24 @@ impl HTTPServer {
     }
 }
 
+#[derive(rust_embed::RustEmbed)]
+#[folder = "web/build"]
+struct WebAssets;
+
+fn serve_web_assets() -> warp::filters::BoxedFilter<(impl warp::Reply,)> {
+    warp::path("static")
+        .and(warp::path::tail())
+        .and_then(serve_web_asset)
+}
+
+fn serve_web_asset(path: warp::path::Tail) -> warp::filters::BoxedFilter<(impl warp::Reply,)> {
+    let asset = WebAssets::get(path.as_str()).unwrap();
+}
+
+// Setup web assets.
+// 1. If file not exists, return 404.
+// 2. If file exists, extract file into string and set content type based on file extension.
+
 mod route {
     use std::collections::HashMap;
     use std::fs;

@@ -1,0 +1,15 @@
+{
+  "name": "smallquery_web",
+  "version": "1.0.0",
+  "description": "Web assets for SmallQuery",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "build": "tailwindcss build -i ./src/styles.css -o ./build/static/styles.css"
+  },
+  "author": "SmallQueryEngine",
+  "license": "MIT",
+  "devDependencies": {
+    "tailwindcss": "^3.4.1"
+  }
+}
