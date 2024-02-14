@@ -38,7 +38,11 @@ impl WorkspacePath {
         if sanitized_components.is_empty() {
             sanitized_components.push(path::Component::RootDir);
         }
-        WorkspacePath(sanitized_components.iter().collect())
+        let mut path = path::PathBuf::from_iter(sanitized_components);
+        if path.starts_with("/") {
+            path = path.strip_prefix("/").unwrap().to_path_buf();
+        }
+        WorkspacePath(path)
     }
 
     pub fn as_str(&self) -> &str {

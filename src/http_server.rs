@@ -30,8 +30,7 @@ where
     let render = hbs
         .render(template.name, &template.value)
         .unwrap_or_else(|err| err.to_string());
-    // warp::reply::html(render)
-    render
+    warp::reply::html(render)
 }
 
 impl HTTPServer {
@@ -44,13 +43,13 @@ impl HTTPServer {
         //  1. Found file
         //  2. Found directory
         //  3. Error
-        let template = "<!DOCTYPE html>
+        let found_file_template = "<!DOCTYPE html>
                     <html>
                     <head>
-                        <title>Workspace Detail</title>
+                        <title>Found file</title>
                     </head>
                     <body>
-                        <h1>Workspace Detail</h1>
+                        <h1>Found file</h1>
                         <h2>Workspace Logs:</h2>
                         <pre>{{logs}}</pre>
                         <h2>Workspace Query Results:</h2>
@@ -60,9 +59,40 @@ impl HTTPServer {
                     ";
 
         let mut hb = handlebars::Handlebars::new();
-        hb.register_template_string("workspace_detail", template)
+        hb.register_template_string("found_file", found_file_template)
             .unwrap();
+        let found_directory_template = "<!DOCTYPE html>
+        <html>
+        <head>
+            <title>Found Directory</title>
+        </head>
+        <body>
+            <h1>Found directory</h1>
+            <h2>Workspace Logs:</h2>
+            <pre>{{logs}}</pre>
+            <h2>Workspace Query Results:</h2>
+            <pre>{{workspace_query_result}}</pre>
+        </body>
+        </html>
+        ";
+        hb.register_template_string("found_directory", found_directory_template);
+        let error_template = "<!DOCTYPE html>
+        <html>
+        <head>
+            <title>Error</title>
+        </head>
+        <body>
+            <h1>Error</h1>
+            <h2>Workspace Logs:</h2>
+            <pre>{{logs}}</pre>
+            <h2>Error:</h2>
+            <pre>{{error}}</pre>
+        </body>
+        </html>
+        ";
+        hb.register_template_string("error", error_template);
         let hb = sync::Arc::new(hb);
+        let handlebars =  move |with_template| render(with_template, hb.clone());
 
         // GET => / => "Hello, World!"
         let root = warp::get().and(warp::path::end()).map(|| "Hello, World!");
@@ -80,7 +110,7 @@ impl HTTPServer {
             .and(warp::path::end())
             .and(warp::query::<HashMap<String, String>>())
             .map(
-                move |input_workspace_name: String, query_params: HashMap<String, String>| {
+                |input_workspace_name: String, query_params: HashMap<String, String>| {
                     let input_version_default = "latest".to_string();
                     let input_version = query_params
                         .get("version")
@@ -116,7 +146,13 @@ impl HTTPServer {
                     let workspaces_mount_default = path::PathBuf::from("workspaces"); // TODO: Make this configurable
                     let workspaces_mount = workspaces_mount_default.canonicalize().unwrap();
                     let workspace_mount = workspaces_mount.join(name);
-                    let repo = git2::Repository::open(&workspace_mount).unwrap();
+                    let repo = match git2::Repository::open(&workspace_mount) {
+                        Ok(repo) => repo,
+                        Err(git_error) => return WithTemplate{
+                            name: "error",
+                            value: json!({"error": format!("Error when opening workspace: code={:?} error={:?}", git_error.code(), git_error.message())}),
+                        },
+                    };
 
                     // Look-up and checkout the workspace version to the temporary directory.
                     let commit = if let Ok(reference) = repo.resolve_reference_from_short_name(version.as_str()) {
@@ -124,10 +160,10 @@ impl HTTPServer {
                     } else if let Ok(commit) = repo.find_commit_by_prefix(version.as_str()) {
                         commit
                     } else {
-                        return format!(
-                            "Version {:?} does not exist in workspace {:?}",
-                            version, workspace_query.workspace_name,
-                        );
+                        return WithTemplate{
+                            name: "error",
+                            value: json!({"error": format!("version {:?} does not exist in workspace {:?}", version, name)}),
+                        };
                     };
 
                     println!("Version: {:?} -> Commit: {:?}", workspace_query.workspace_version, commit.id());
@@ -137,32 +173,31 @@ impl HTTPServer {
                     checkout_builder.recreate_missing(true);
 
                     if let Err(git_error) = repo.checkout_tree(&commit.into_object(), Some(&mut checkout_builder)) {
-                        return match git_error.code() {
+                        match git_error.code() {
                             git2::ErrorCode::UnbornBranch => {
-                                format!(
-                                    "Version {:?} does not exist in workspace {:?}",
-                                    workspace_query.workspace_version, workspace_query.workspace_name,
-                                )
+                                return WithTemplate{
+                                    name: "error",
+                                    value: json!({"error": format!("version {:?} does not exist in workspace {:?}", version, name)}),
+                                };
                             },
                             git2::ErrorCode::GenericError => {
-                                panic!(
-                                    "Generic Error when checking out workspace: code={:?} error={:?}",
-                                    git_error.code(),
-                                    git_error.message(),
-                                )
-                            }
-                            _ => panic!("Error checking out workspace: code={:?} error={:?}", git_error.code(), git_error.message()), 
+                                return WithTemplate{
+                                    name: "error",
+                                    value: json!({"error": format!("Generic Error when checking out workspace: code={:?} error={:?}", git_error.code(), git_error.message())}),
+                                };
+                            },
+                            _ => {
+                                return WithTemplate{
+                                name: "error",
+                                value: json!({"error": format!("Unexpected Error when checking out workspace: code={:?} error={:?}", git_error.code(), git_error.message())}),
+                                }; 
+                            },
                         };
                     }
                     // End Git Adapter Code
 
                     let path = &workspace_query.workspace_path;
-                    let path = if let Ok(path) = path.as_ref().strip_prefix("/") {
-                        path
-                    } else {
-                        path.as_ref()
-                    };
-                    let workdir_path_mount = workdir_mount.join(path);
+                    let workdir_path_mount = workdir_mount.join(path.as_ref());
 
                     let logs = format!("
                         -- Input --
@@ -196,6 +231,13 @@ impl HTTPServer {
 
                     // Filesystem Adapter Code
                     // In the checkout, list all items in the workspace path, or return the file content if it's a file.
+                    if !path::Path::new(&workdir_path_mount).exists() {
+                        return WithTemplate{
+                            name: "error",
+                            value: json!({"error": format!("path {:?} does not exist in workspace {:?}", path, name)}),
+                        };
+                    }
+
                     let workspace_query_result = if workdir_path_mount.is_file() {
                         crate::core::WorkspaceQueryResult::File{
                             name: workspace_query.workspace_path.as_str().to_string(),
@@ -215,13 +257,22 @@ impl HTTPServer {
                     };
                     // End Filesystem Adapter Code
 
-
-                    render(WithTemplate{
-                        name: "workspace_detail",
-                        value: json!({"logs": logs, "workspace_query_result": workspace_query_result}),
-                    }, hb.clone())
+                    match workspace_query_result {
+                        crate::core::WorkspaceQueryResult::File{ name, contents } => {
+                            WithTemplate{
+                                name: "found_file",
+                                value: json!({"logs": logs, "workspace_query_result": format!("name={:?} contents={:?}", name, contents)}),
+                            }
+                        },
+                        crate::core::WorkspaceQueryResult::Directory{ name, items } => {
+                            WithTemplate{
+                                name: "found_directory",
+                                value: json!({"logs": logs, "workspace_query_result": format!("name={:?} items={:?}", name, items)}),
+                            }
+                        },
+                    }
                 },
-            );
+            ).map(handlebars);
 
         let routes = root.or(health).or(detail_workspace).or(list_workspaces);
 
