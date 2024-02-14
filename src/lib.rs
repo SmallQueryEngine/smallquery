@@ -1,5 +1,6 @@
 mod core;
 mod http_server;
+mod template;
 
 enum ExitCode {
     Success = 0,

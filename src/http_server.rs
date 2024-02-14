@@ -18,20 +18,6 @@ impl HTTPServer {
     }
 }
 
-struct WithTemplate<T: serde::Serialize> {
-    name: &'static str,
-    value: T,
-}
-
-fn render<T>(template: WithTemplate<T>, hbs: sync::Arc<handlebars::Handlebars<'_>>) -> impl warp::Reply
-where
-    T: serde::Serialize,
-{
-    let render = hbs
-        .render(template.name, &template.value)
-        .unwrap_or_else(|err| err.to_string());
-    warp::reply::html(render)
-}
 
 impl HTTPServer {
     pub async fn run(self) -> Result<(), std::io::Error> {
@@ -43,56 +29,9 @@ impl HTTPServer {
         //  1. Found file
         //  2. Found directory
         //  3. Error
-        let found_file_template = "<!DOCTYPE html>
-                    <html>
-                    <head>
-                        <title>Found file</title>
-                    </head>
-                    <body>
-                        <h1>Found file</h1>
-                        <h2>Workspace Logs:</h2>
-                        <pre>{{logs}}</pre>
-                        <h2>Workspace Query Results:</h2>
-                        <pre>{{workspace_query_result}}</pre>
-                    </body>
-                    </html>
-                    ";
 
-        let mut hb = handlebars::Handlebars::new();
-        hb.register_template_string("found_file", found_file_template)
-            .unwrap();
-        let found_directory_template = "<!DOCTYPE html>
-        <html>
-        <head>
-            <title>Found Directory</title>
-        </head>
-        <body>
-            <h1>Found directory</h1>
-            <h2>Workspace Logs:</h2>
-            <pre>{{logs}}</pre>
-            <h2>Workspace Query Results:</h2>
-            <pre>{{workspace_query_result}}</pre>
-        </body>
-        </html>
-        ";
-        hb.register_template_string("found_directory", found_directory_template);
-        let error_template = "<!DOCTYPE html>
-        <html>
-        <head>
-            <title>Error</title>
-        </head>
-        <body>
-            <h1>Error</h1>
-            <h2>Workspace Logs:</h2>
-            <pre>{{logs}}</pre>
-            <h2>Error:</h2>
-            <pre>{{error}}</pre>
-        </body>
-        </html>
-        ";
-        hb.register_template_string("error", error_template);
-        let hb = sync::Arc::new(hb);
-        let handlebars =  move |with_template| render(with_template, hb.clone());
+        let registry = sync::Arc::new(crate::template::new_registry());
+        let render_template =  move |template: crate::template::Template| template.render(registry.clone());
 
         // GET => / => "Hello, World!"
         let root = warp::get().and(warp::path::end()).map(|| "Hello, World!");
@@ -148,9 +87,11 @@ impl HTTPServer {
                     let workspace_mount = workspaces_mount.join(name);
                     let repo = match git2::Repository::open(&workspace_mount) {
                         Ok(repo) => repo,
-                        Err(git_error) => return WithTemplate{
+                        Err(git_error) => return crate::template::Template{
                             name: "error",
-                            value: json!({"error": format!("Error when opening workspace: code={:?} error={:?}", git_error.code(), git_error.message())}),
+                            values: HashMap::from([
+                                ("error", format!("Error when opening workspace: code={:?} error={:?}", git_error.code(), git_error.message()).to_string()),
+                            ]),
                         },
                     };
 
@@ -160,9 +101,11 @@ impl HTTPServer {
                     } else if let Ok(commit) = repo.find_commit_by_prefix(version.as_str()) {
                         commit
                     } else {
-                        return WithTemplate{
+                        return crate::template::Template{
                             name: "error",
-                            value: json!({"error": format!("version {:?} does not exist in workspace {:?}", version, name)}),
+                            values: HashMap::from([
+                                ("error", format!("version {:?} does not exist in workspace {:?}", version, name).to_string()),
+                            ]),
                         };
                     };
 
@@ -172,24 +115,30 @@ impl HTTPServer {
                     checkout_builder.target_dir(&workdir_mount);
                     checkout_builder.recreate_missing(true);
 
-                    if let Err(git_error) = repo.checkout_tree(&commit.into_object(), Some(&mut checkout_builder)) {
+                    if let Err(git_error) = repo.checkout_tree(&commit.clone().into_object(), Some(&mut checkout_builder)) {
                         match git_error.code() {
                             git2::ErrorCode::UnbornBranch => {
-                                return WithTemplate{
+                                return crate::template::Template{
                                     name: "error",
-                                    value: json!({"error": format!("version {:?} does not exist in workspace {:?}", version, name)}),
+                                    values: HashMap::from([
+                                        ("error", format!("version {:?} does not exist in workspace {:?}", version, name).to_string()),
+                                    ]),
                                 };
                             },
                             git2::ErrorCode::GenericError => {
-                                return WithTemplate{
+                                return crate::template::Template{
                                     name: "error",
-                                    value: json!({"error": format!("Generic Error when checking out workspace: code={:?} error={:?}", git_error.code(), git_error.message())}),
+                                    values: HashMap::from([
+                                        ("error", format!("Generic Error when checking out workspace {:?} name at version {:?}\n{:?} does not exist in workspace {:?}", name, version, git_error.code(), git_error.message()).to_string()),
+                                    ]),
                                 };
                             },
                             _ => {
-                                return WithTemplate{
-                                name: "error",
-                                value: json!({"error": format!("Unexpected Error when checking out workspace: code={:?} error={:?}", git_error.code(), git_error.message())}),
+                                return crate::template::Template{
+                                    name: "error",
+                                    values: HashMap::from([
+                                        ("error", format!("Unexpected Error when checking out workspace {:?} name at version {:?}\n{:?} does not exist in workspace {:?}", name, version, git_error.code(), git_error.message()).to_string()),
+                                    ]),
                                 }; 
                             },
                         };
@@ -208,6 +157,7 @@ impl HTTPServer {
                         Workspace Name: {:?}
                         Workspace Path: {:?}
                         Workspace Version: {:?}
+                        Commit ID: {:?}
                         -- Configured --
                         Workspaces Mount: {:?}
                         Workspace Mount: {:?}
@@ -221,6 +171,7 @@ impl HTTPServer {
                         workspace_query.workspace_name,
                         workspace_query.workspace_path,
                         workspace_query.workspace_version,
+                        commit.id().to_string(),
                         workspaces_mount,
                         workspace_mount,
                         workdir_mount,
@@ -232,9 +183,11 @@ impl HTTPServer {
                     // Filesystem Adapter Code
                     // In the checkout, list all items in the workspace path, or return the file content if it's a file.
                     if !path::Path::new(&workdir_path_mount).exists() {
-                        return WithTemplate{
+                        return crate::template::Template{
                             name: "error",
-                            value: json!({"error": format!("path {:?} does not exist in workspace {:?}", path, name)}),
+                            values: HashMap::from([
+                                ("error", format!("path {:?} does not exist in workspace {:?} and version {:?}", path, name, version)),
+                            ]),
                         };
                     }
 
@@ -259,20 +212,27 @@ impl HTTPServer {
 
                     match workspace_query_result {
                         crate::core::WorkspaceQueryResult::File{ name, contents } => {
-                            WithTemplate{
+                            crate::template::Template{
                                 name: "found_file",
-                                value: json!({"logs": logs, "workspace_query_result": format!("name={:?} contents={:?}", name, contents)}),
+                                values: HashMap::from([
+                                    ("logs", logs),
+                                    ("workspace_query_result", format!("name={:?} contents={:?}", name, contents)),
+                                ]),
                             }
                         },
                         crate::core::WorkspaceQueryResult::Directory{ name, items } => {
-                            WithTemplate{
+                            crate::template::Template{
                                 name: "found_directory",
-                                value: json!({"logs": logs, "workspace_query_result": format!("name={:?} items={:?}", name, items)}),
+                                values: HashMap::from([
+                                    ("logs", logs),
+                                    ("workspace_query_result", format!("name={:?} items={:?}", name, items)),
+                                ]),
                             }
                         },
                     }
                 },
-            ).map(handlebars);
+            ).map(render_template)
+            .map(warp::reply::html);
 
         let routes = root.or(health).or(detail_workspace).or(list_workspaces);
 
