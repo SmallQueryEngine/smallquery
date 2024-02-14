@@ -1,0 +1,15 @@
+{{#> base.hbs}}
+
+{{#*inline "title"}}
+Error
+{{/inline}}
+
+{{#*inline "content"}}
+<h1>Found file</h1>
+<h2>Workspace Logs:</h2>
+<pre>{{logs}}</pre>
+<h2>Workspace Query Results:</h2>
+<pre>{{workspace_query_result}}</pre>
+{{/inline}}
+
+{{/base.hbs}}

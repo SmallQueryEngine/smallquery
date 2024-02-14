@@ -1,72 +1,45 @@
 use std::collections::HashMap;
-use std::sync;
+use std::str;
+
+#[derive(rust_embed::RustEmbed)]
+#[folder = "src/templates"]
+struct Templates;
 
 pub struct Template {
-    pub name: &'static str,
+    pub path: &'static str,
     pub values: HashMap<&'static str, String>,
 }
 
-impl Template {
-    pub fn render(self, registry: sync::Arc<handlebars::Handlebars<'_>>) -> String {
-        registry
-            .render(self.name, &self.values)
-            .unwrap_or_else(|err| err.to_string())
+#[derive(Clone)]
+pub struct Registry(handlebars::Handlebars<'static>);
+
+static TEMPLATE_FILE_PATHS: [&str; 4] = [
+    "base.hbs",
+    "error.hbs",
+    "found_file.hbs",
+    "found_directory.hbs",
+];
+
+impl Registry {
+    /// Create a new instance of the template registry.
+    /// Template files are loaded from embedded templates, defined as the Templates struct.
+    pub fn new() -> Self {
+        let mut handlebars_registry = handlebars::Handlebars::new();
+        for path in TEMPLATE_FILE_PATHS {
+            let contents = match Templates::get(path) {
+                Some(file) => file.data,
+                None => panic!("Expected template file {} but it does not exist.", path),
+            };
+            handlebars_registry
+                .register_template_string(path, str::from_utf8(&contents).unwrap())
+                .unwrap();
+        }
+        Registry(handlebars_registry)
     }
-}
 
-pub fn new_registry() -> handlebars::Handlebars<'static> {
-    let mut registry = handlebars::Handlebars::new();
-    let found_file_template = "<!DOCTYPE html>
-                    <html>
-                    <head>
-                        <title>Found file</title>
-                    </head>
-                    <body>
-                        <h1>Found file</h1>
-                        <h2>Workspace Logs:</h2>
-                        <pre>{{logs}}</pre>
-                        <h2>Workspace Query Results:</h2>
-                        <pre>{{workspace_query_result}}</pre>
-                    </body>
-                    </html>
-                    ";
-    registry
-        .register_template_string("found_file", found_file_template)
-        .unwrap();
-    let found_directory_template = "<!DOCTYPE html>
-        <html>
-        <head>
-            <title>Found Directory</title>
-        </head>
-        <body>
-            <h1>Found directory</h1>
-            <h2>Workspace Logs:</h2>
-            <pre>{{logs}}</pre>
-            <h2>Workspace Query Results:</h2>
-            <pre>{{workspace_query_result}}</pre>
-        </body>
-        </html>
-        ";
-    registry
-        .register_template_string("found_directory", found_directory_template)
-        .unwrap();
-    let error_template = "<!DOCTYPE html>
-        <html>
-        <head>
-            <title>Error</title>
-        </head>
-        <body>
-            <h1>Error</h1>
-            <h2>Workspace Logs:</h2>
-            <pre>{{logs}}</pre>
-            <h2>Error:</h2>
-            <pre>{{error}}</pre>
-        </body>
-        </html>
-        ";
-    registry
-        .register_template_string("error", error_template)
-        .unwrap();
-
-    registry
+    pub fn render(&self, template: &Template) -> String {
+        self.0
+            .render(template.path, &template.values)
+            .unwrap_or_else(|e| e.to_string())
+    }
 }
