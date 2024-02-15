@@ -2,6 +2,9 @@
 
 set -eu
 
+# Set the build mode.
+MODE="${MODE:-dev}"
+
 # Build web assets.
 (
     cd web_assets
@@ -11,5 +14,9 @@ set -eu
 
 # Build the binary executable.
 (
-    cargo build
+    if [ "$MODE" = "dev" ]; then
+        cargo build
+    else
+        cargo build --release
+    fi
 )
