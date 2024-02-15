@@ -5,7 +5,7 @@
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "build": "tailwindcss build -i ./src/styles.css -o ./build/static/styles.css"
+    "build": "tailwindcss build -i ./src/styles.css -o ./build/styles.css"
   },
   "author": "SmallQueryEngine",
   "license": "MIT",

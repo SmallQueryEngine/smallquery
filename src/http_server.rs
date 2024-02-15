@@ -22,6 +22,10 @@ impl HTTPServer {
         let root = warp::get().and(warp::path::end()).map(|| "Hello, World!");
         // GET => /health => "Healthy!"
         let health = warp::get().and(warp::path("health")).map(|| "Healthy!");
+        // GET => /static/* => Serve static files from the web/build directory.
+        let web_assets = warp::path("web_assets")
+            .and(warp::path::tail())
+            .and_then(crate::web::serve_assets);
         // GET => /workspaces => List all workspaces
         let list_workspaces = warp::get()
             .and(warp::path("workspaces"))
@@ -30,7 +34,7 @@ impl HTTPServer {
         // GET => /workspaces/:workspace_name?version=<ref>&path=<path> => GET => Get files for a workspace.
         let detail_workspace = route::detail_workspace(template_registry.clone());
 
-        let routes = root.or(health).or(detail_workspace).or(list_workspaces);
+        let routes = root.or(health).or(web_assets).or(detail_workspace).or(list_workspaces);
 
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
 
@@ -47,19 +51,6 @@ impl HTTPServer {
     }
 }
 
-#[derive(rust_embed::RustEmbed)]
-#[folder = "web/build"]
-struct WebAssets;
-
-fn serve_web_assets() -> warp::filters::BoxedFilter<(impl warp::Reply,)> {
-    warp::path("static")
-        .and(warp::path::tail())
-        .and_then(serve_web_asset)
-}
-
-fn serve_web_asset(path: warp::path::Tail) -> warp::filters::BoxedFilter<(impl warp::Reply,)> {
-    let asset = WebAssets::get(path.as_str()).unwrap();
-}
 
 // Setup web assets.
 // 1. If file not exists, return 404.
@@ -72,6 +63,8 @@ mod route {
     use warp::Filter;
     use rand::Rng;
     use std::sync;
+
+
 
     pub fn query_workspace(template_registry: sync::Arc<crate::template::Registry>) -> impl warp::Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
         warp::get()
