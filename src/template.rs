@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::str;
 
 #[derive(rust_embed::RustEmbed)]
-#[folder = "src/templates"]
+#[folder = "templates"]
 struct Templates;
 
 pub struct Template {
